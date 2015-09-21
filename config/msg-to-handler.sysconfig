@@ -1,0 +1,13 @@
+#
+# configuration file for the msg-to-handler init script
+#
+
+# use this configuration file
+MSG_TO_HANDLER_CONFIG=/etc/msg-to-handler.conf
+
+# run as this user
+MSG_TO_HANDLER_USER=nagios
+
+# use these options
+MSG_TO_HANDLER_OPTIONS=
+

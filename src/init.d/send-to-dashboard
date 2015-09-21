@@ -1,0 +1,76 @@
+#!/bin/bash
+
+# ncg  -  This shell script enables send-to-dashboard cronjob
+#
+# Author:       eimamagi@srce.hr
+#
+# chkconfig:    - 89 10
+#
+# description:  Enable a run of ncg cron.
+# processname:  ncg
+
+
+# source function library
+. /etc/rc.d/init.d/functions
+
+lockfile=/var/lock/subsys/send-to-dashboard
+
+RETVAL=0
+
+start() {
+        echo -n $"Enabling send-to-dashboard cron: "
+        touch "$lockfile" && success || failure
+        let "RETVAL+=$?"
+        echo
+}
+
+stop() {
+        echo -n $"Disabling send-to-dashboard cron: "
+        rm -f "$lockfile" && success || failure
+        RETVAL=$?
+        echo
+}
+
+reload() {
+        echo -n $"Running send-to-dashboard: "
+        /usr/sbin/send-to-dashboard > /dev/null 2>&1 && success || failure
+        echo
+}
+
+restart() {
+        stop
+        start
+}
+
+case "$1" in
+  start)
+        start
+        ;;
+  stop)
+        stop
+        ;;
+  restart|force-reload)
+        restart
+        ;;
+  reload)
+        reload
+        ;;
+  condrestart)
+        [ -f "$lockfile" ] && restart
+        ;;
+  status)
+        if [ -f $lockfile ]; then
+                echo $"Cron send-to-dashboard is enabled."
+                RETVAL=0
+        else
+                echo $"Cron send-to-dashboard is disabled."
+                RETVAL=3
+        fi
+        ;;
+  *)
+        echo $"Usage: $0 {start|stop|status|restart|reload|force-reload|
+condrestart}"
+        exit 1
+esac
+
+exit $RETVAL

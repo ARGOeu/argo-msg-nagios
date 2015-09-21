@@ -1,0 +1,33 @@
+#!/bin/sh
+#
+# check if msg-to-handler is alive and kicking, (re)start it if needed
+#
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+name=msg-to-handler
+logger=logger
+[ -t 2 ] && logger="logger -s"
+pid=/var/run/$name/pid
+
+ok=`chkconfig --list $name | grep :on`
+if [ "x$ok" = "x" ]; then
+  [ -t 2 ] && echo "$name is not enabled" >&2
+  exit 0
+fi
+
+if [ ! -f $pid ]; then
+  $logger -t msg-to-handler.chk -- "$name is not running: starting it..."
+  service $name start >/dev/null 2>&1
+  exit 0
+fi
+
+ok=`find $pid -mmin -10`
+if [ "x$ok" = "x" ]; then
+  date=`date +"%Y/%m/%d-%H:%M:%S" -r $pid`
+  $logger -t msg-to-handler.chk -- "$name is stuck since $date: restarting it..."
+  service $name restart >/dev/null 2>&1
+  exit 0
+fi
+
+[ -t 2 ] && echo "$name is running normally" >&2
+exit 0

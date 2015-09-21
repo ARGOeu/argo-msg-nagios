@@ -1,0 +1,231 @@
+#!/usr/bin/perl -w
+# This script scans the Nagios status file, and displays or resends the specified notifications
+
+use strict;
+use warnings;
+use Time::ParseDate;
+use Getopt::Long;
+use Switch;
+
+my $notification_status = "SENT";
+my $status_file = "/var/nagios/status.dat";
+our $notification_handler = "/usr/libexec/grid-monitoring/plugins/nagios/eventhandlers/handle_service_change";
+our $nagios_user = "nagios";
+my $user = "unknown";
+my $nagios_status;
+my $nagios_status_arg;
+
+my $error = 0; 
+my $help = 0;
+my $verbose = 0;
+my $timeout = 0;
+my $dryrun = 0;
+my $command = "list";
+my $role = "site";
+our $header = 0;
+
+my %nagios_states = (OK=>0,
+            WARNING=>1,
+            CRITICAL=>2,
+            UNKNOWN=>3,
+            DEPENDENT=>4);
+
+GetOptions(
+  'file=s'   => \$status_file,
+  'command=s' => \$command,
+  'status=s' => \$notification_status,
+  'timeout=s' => \$timeout,
+  'nagios-status=s' => \$nagios_status_arg,
+  'role=s' => \$role,
+    'v' => \$verbose,
+    'h' => \$help,
+    'dry-run' => \$dryrun
+) or $error = 1;
+
+if ($help or $error) {
+
+	print_help();
+	exit 1;
+} 
+
+$notification_status = ".+" if ($notification_status =~ m/all/i);
+$timeout *= 60;
+
+$nagios_status = $nagios_states{$nagios_status_arg} if ( defined $nagios_status_arg && exists $nagios_states{$nagios_status_arg} );
+
+my $item = "";
+my $content;
+my $lastnotification = 0;
+my %services = ();
+
+my $host;
+my $dashboardstatus = "";
+my $dashboardstatus_time = "";
+
+# Small check to prevent unwanted code execution
+$role =~ s/\W//g;
+# Picking-up the relevant user
+$user = (getpwuid($<))[0];
+if ($user ne "$nagios_user") {
+				$notification_handler = "su nagios -c \"".$notification_handler;
+                		$role .= "\"";
+}
+
+print "[INFO] dry-run enabled, no message will actually be sent.\n\n" if $dryrun;
+
+# Reading the Nagios status file
+open (STATUS, $status_file) or die "Could not open Nagios status file at $status_file";
+while (<STATUS>) {
+
+	if ( !$item && /\s*(\w+)\s+{/ ) {
+		$item=$1;
+		$content={};
+	}
+	elsif ( ($item) && /\s*}/) {
+		if (defined($content->{'host_name'}) && defined($content->{'service_description'})) {
+
+			# Selecting only notifications that have passed the specified timemout
+			if (defined $content->{'_DASHBOARD_NOTIFICATION_STATUS_LAST_UPDATE'} && $timeout > 0) {
+				($lastnotification = $content->{'_DASHBOARD_NOTIFICATION_STATUS_LAST_UPDATE'}) =~ s/\d\;()//g;
+				$lastnotification =~ s/Z$/ UTC/;
+				$lastnotification = parsedate($lastnotification);
+				$timeout += $lastnotification;
+				$item = "" if $timeout > time();
+			}
+			if ($item eq "servicestatus" && 1 ) {
+		
+				$services{$content->{'host_name'}.'_____'.$content->{'service_description'}}=$content;
+			}
+		}
+		$item = "";
+		$lastnotification = "";
+	}
+	elsif ( $item && /\s*(\w+)=(.*)/ ) {
+		$content->{$1}=$2;
+	}
+}
+close(STATUS);
+
+# Processing the content of the Nagios status file
+my $service;
+foreach my $key (keys %services) {
+	# Crawling through all the identified services
+	my %host_service = %{$services{$key}};
+	$host=$host_service{host_name};
+	$service=$host_service{service_description};
+
+	# check the current service state
+	next if ( defined $nagios_status && ($host_service{current_state} != $nagios_status) );
+
+	# skip services which are not pushed to MyEGI
+	next if ( !$host_service{obsess_over_service} );
+
+	# Extracting and processing the last notification status and its time
+	$dashboardstatus = $host_service{_DASHBOARD_NOTIFICATION_STATUS};
+	$dashboardstatus = 'NONE' if ( defined ($dashboardstatus) && $dashboardstatus eq '0;');
+	$dashboardstatus =~ s/\d\;// if defined ($dashboardstatus);
+	$dashboardstatus_time = $host_service{_DASHBOARD_NOTIFICATION_STATUS_LAST_UPDATE};
+	$dashboardstatus_time =~ s/\d\;// if defined ($dashboardstatus_time);
+
+	# Checking if the identified services has notifications matching the specified requirements
+	if ( defined ($dashboardstatus) && ($dashboardstatus =~ m/$notification_status/i )) {
+
+		# Identified a relevant host/service. Now taking action:
+		switch ($command) {
+
+			case "list"	{ 
+                                          printf "%-20s %-35s %-45s %-30s\n", "MSG_STATUS", "HOST", "SERVICE", "LAST_NOTIFICATION" if !$header;
+                                          $header = 1;
+                                          printf "%-20s %-35s %-45s %-30s\n", $dashboardstatus, $host, $service, $dashboardstatus_time;
+			}
+
+			case "resend"   { resend_notification(\%host_service, $dryrun); }
+
+			else 		{ print_help(); exit 1; }
+		}
+	}
+}
+
+
+sub resend_notification{
+
+        my $posting = "";
+        my $host_service = shift;
+        my $dryrun = shift;
+        my %state = ();
+	
+	# Preparing the environment
+	foreach my $nagios_var (sort (keys %ENV)) {
+		delete $ENV{$nagios_var} if ($nagios_var =~ m/^NAGIOS\_/);
+	}
+	$ENV{'NAGIOS_SERVICEDESC'} = $host_service->{service_description} if defined($host_service->{service_description});
+	$ENV{'NAGIOS_HOSTNAME'} = $host_service->{host_name} if defined($host_service->{host_name});
+	$ENV{'NAGIOS_LASTSERVICECHECK'} = $host_service->{last_check} if defined($host_service->{last_check});
+	$ENV{'NAGIOS_SERVICEPROBLEMID'} = $host_service->{current_problem_id} if defined($host_service->{current_problem_id});
+	$ENV{'NAGIOS_LASTSERVICEPROBLEMID'} = $host_service->{last_problem_id} if defined($host_service->{last_problem_id});
+	$ENV{'NAGIOS_LONGSERVICEOUTPUT'} = $host_service->{long_plugin_output} if defined($host_service->{long_plugin_output});
+	$ENV{'NAGIOS_CONTACTNAME'} = "";
+	$ENV{'NAGIOS_CONTACTEMAIL'} = "";
+        $ENV{'NAGIOS__SERVICEGGUS'} = "";
+	$ENV{'NAGIOS_TIMET'} = time();
+	($ENV{'NAGIOS__SERVICESERVICE_URI'} = $host_service->{_SERVICE_URI}) =~ s/\d\;()//g if defined($host_service->{_SERVICE_URI});
+	($ENV{'NAGIOS__SERVICESITE_NAME'} = $host_service->{_SITE_NAME}) =~ s/\d\;()//g if defined($host_service->{_SITE_NAME});
+	($ENV{'NAGIOS__SERVICESERVER'} = $host_service->{_SERVER}) =~ s/\d\;()//g if defined($host_service->{_SERVER});
+	($ENV{'NAGIOS__SERVICESERVICE_FLAVOUR'} = $host_service->{_SERVICE_FLAVOUR}) =~ s/\d\;()//g if defined($host_service->{_SERVICE_FLAVOUR});
+	($ENV{'NAGIOS__SERVICEROC'} = $host_service->{_ROC}) =~ s/\d\;()//g if defined($host_service->{_ROC});
+	($ENV{'NAGIOS__SERVICEVO'} = $host_service->{_VO}) =~ s/\d\;()//g if defined($host_service->{_VO});
+	($ENV{'NAGIOS__SERVICEDASHBOARD_NOTIFICATION_STATUS_LAST_UPDATE'} = $host_service->{_DASHBOARD_NOTIFICATION_STATUS_LAST_UPDATE}) =~ s/\d\;()//g if defined($host_service->{_DASHBOARD_NOTIFICATION_STATUS_LAST_UPDATE});
+	($ENV{'NAGIOS__SERVICEDASHBOARD_NOTIFICATION_STATUS'} = $host_service->{_DASHBOARD_NOTIFICATION_STATUS}) =~ s/\d\;()//g if defined($host_service->{_DASHBOARD_NOTIFICATION_STATUS});
+	($ENV{'NAGIOS_SERVICENOTES'} = $host_service->{_NOTES}) =~ s/\d\;()//g if defined($host_service->{_NOTES});
+	($ENV{'NAGIOS_SERVICENOTESURL'} = $host_service->{_NOTESURL}) =~ s/\d\;()//g if defined($host_service->{_NOTESURL});
+	($ENV{'NAGIOS_NOTIFICATIONTYPE'} = $host_service->{_LAST_NOTIFICATION_TYPE}) =~ s/\d\;()//g if defined($host_service->{_LAST_NOTIFICATION_TYPE});
+	$ENV{'NAGIOS_NOTIFICATIONTYPE'} = 'RECOVERY' unless ($ENV{'NAGIOS_NOTIFICATIONTYPE'});
+	
+	# Discovering the status state (OK, CRITICAL, etc.) based on the last times
+	$state{"OK"} = $host_service->{last_time_ok};
+	$state{"OK"} += 0;
+	$state{"WARNING"} = $host_service->{last_time_warning};
+	$state{"WARNING"} += 0;
+	$state{"UNKNOWN"} = $host_service->{last_time_unknown};
+	$state{"UNKNOWN"} += 0;
+	$state{"CRITICAL"} = $host_service->{last_time_critical};
+	$state{"CRITICAL"} += 0;
+	my @servicestate = sort {$state{$b} <=> $state{$a}} keys %state;
+	$ENV{'NAGIOS_SERVICESTATE'} =  $servicestate[0];
+
+	# Calling the notification handler:
+        if ($verbose or $dryrun) {
+                printf "%-10s %-35s %-45s %-10s %-15s\n", "MSG_STATUS", "HOST", "SERVICE", "STATUS", "NOTIFICATION_TYPE" if !$header;                $header = 1;
+                printf "%-10.10s %-35.35s %-45.45s %-15.15s %-15.15s\n", $ENV{'NAGIOS__SERVICEDASHBOARD_NOTIFICATION_STATUS'}, $host_service->{host_name}, $host_service->{service_description}, $ENV{'NAGIOS_SERVICESTATE'}, $ENV{'NAGIOS_NOTIFICATIONTYPE'};
+        }
+        # Calling the notification handler
+        $posting = `$notification_handler --send-to-dashboard --role=$role` if !$dryrun;
+        print $posting;
+
+}
+
+sub print_help {
+
+print"\nUsage: \n";
+print"\n $0 -status <status> -command <command> [-timeout <time in minutes>] [-file <file>] [-v] [-h] [-role <role>] \n\n";
+print"\nWhere:";
+print"\n\t<status>\tCurrent status of the notification. (The default value is 'SENT'.)";
+print"\n\t\t\tSupported statuses: ACK, SENT, WARN, NONE, ALL";
+print"\n\n\t<command>\taction to be taken by the program. (The default value is 'list')";
+print"\n\t\t\tSupported commands: list, resend";
+print"\n\n\t<timeout>\tMaximum permitted time, in minutes, elapsed after the last notification status change.";
+print"\n\t\t\tBy default, all notifications are included.";
+print"\n\n\t<file>\t\tPath to the Nagios status file. (The default value is '/var/nagios/status.dat'.)";
+print"\n\n\t<role>\t\tRole to be used to resend the notification. (The default value is 'site'.)";
+print"\n\n\t-v\t\tActivate verbose mode";
+print"\n\n\t-dry-run\tActivate dry-run mode, no message will actually be resent";
+print"\n\n\t-h\t\tDisplay this help";
+print"\n\nExamples: ";
+print"\n\nList all the current notifications reportedly causing problems:";
+print"\n\t$0 -status WARN -command list";
+print"\n\nResend all the notifications, as the ROC, that have not been acknowledged after 30 minutes";
+print"\n\t$0 -status SENT -command resend -timeout 30 -role ROC";
+print"\n\nResend all notifications as a site:";
+print"\n\t$0 -status ALL -command resend -role site\n";
+
+}

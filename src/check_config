@@ -1,0 +1,138 @@
+#!/usr/bin/perl
+#
+# Check imports massages from dir queue to Nagios as passive checks
+# Copyright (c) 2009 Emir Imamagic
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+use strict;
+use warnings;
+use Nagios::Plugin;
+use GridMon::ConfigCache;
+
+#use TOM::Nagios qw(nagios_debug);
+use GridMon::Nagios qw(nagios_debug);
+
+#use TOM::Syslog qw(syslog_open);
+use No::Worries::Syslog qw(syslog_open);
+
+use No::Worries::Warn qw(warnf);
+use No::Worries::Die qw(dief handler); 
+
+#$SIG{__DIE__}  = \&TOM::Nagios::handle_die;
+$SIG{__DIE__}  = \&No::Worries::Die::handler;
+#$SIG{__WARN__} = \&TOM::Nagios::handle_warn;
+$SIG{__WARN__} = \&No::Worries::Warn::handler;
+
+syslog_open(ident => "check_config", facility => "user");
+nagios_debug("started");
+
+# Standard variables used in Nagios::Plugin constructor
+use constant PROGNAME => "$0";
+use constant VERSION => '1.0';
+use constant DESCRIPTION => 'Checks if new configurations from remote Nagioses are available.';
+use constant EXTRA_DESC => "";
+use constant LICENSE => 'This nagios plugin is free software, and comes with ABSOLUTELY NO WARRANTY.
+It may be used, redistributed and/or modified under the terms of the GNU
+General Public Licence (see http://www.fsf.org/licensing/licenses/gpl.txt).
+Copyright (c) 2009 Emir Imamagic';
+use constant SHORTNAME => 'check_config';
+use constant USAGE => "usage: $0 [ -v ] [ --config-cache I<file> ] [ --config-table I<table-name> ]\n";
+use constant DEFAULT_CONFIG_CACHE => '/var/cache/msg/config-cache/config.db';
+use constant DEFAULT_CONFIG_TABLE => 'config_incoming';
+
+# Create Nagios::Plugin instance
+my $plugin = Nagios::Plugin->new (usage => USAGE,
+                                  shortname => SHORTNAME,
+                                  version => VERSION,
+                                  blurb => DESCRIPTION,
+                                  extra => EXTRA_DESC,
+                                  license => LICENSE,
+                                  plugin  => PROGNAME);
+# Define additional arguments
+$plugin->add_arg(
+    spec => 'config-cache=s',
+    help => "--config-cache\n   Configuration cache file (SQLite database).\n   (default: ".DEFAULT_CONFIG_CACHE.")",
+    required => 0,
+    default => DEFAULT_CONFIG_CACHE
+);
+$plugin->add_arg(
+    spec => 'config-table=s',
+    help => "--config-table\n   Configuration table in database.\n   (default: ".DEFAULT_CONFIG_TABLE.")",
+    required => 0,
+    default => DEFAULT_CONFIG_TABLE
+);
+
+$plugin->getopts();
+
+local $SIG{ALRM} = sub {
+    $plugin->nagios_die("Timeout while fetching results.");
+};
+
+local $SIG{TERM} = sub {
+    $plugin->nagios_die("Plugin received TERM signal.");
+};
+
+alarm ($plugin->opts->timeout);
+
+my $config_cache = GridMon::ConfigCache->new({ CACHE_FILE => $plugin->opts->get('config-cache'), CACHE_TABLE => $plugin->opts->get('config-table') });
+
+if (!defined $config_cache) {
+    exit CRITICAL;
+}
+
+my ($retVal, $count) = $config_cache->getUpdatedCount();
+alarm (0);
+if (!$retVal) {
+    $plugin->add_perfdata( label => "configs", value => 0);
+    $plugin->nagios_exit(CRITICAL, "$count\n");
+} else {
+    $plugin->add_perfdata( label => "configs", value => $count);
+    if ($count == 0) {
+    	$plugin->nagios_exit(OK, "No new/updated configuration.");
+    } else {
+        $plugin->nagios_exit(WARNING, "Found $count new/updated configurations. Please rerun NCG.");
+    }
+}
+
+=head1 NAME
+
+check_config - A nagios check for checking if new configurations coming from 
+external Nagioses are available.
+
+=head1 SYNOPSIS
+
+B<check_config> [-v] [ --config-cache I<file> ] [ --config-table I<table-name> ]
+
+=head1 DESCRIPTION
+
+B<check_config> is called as a Nagios check. It reads generated Nagios
+configuration from SQLite based cache and check if there are new or updated
+configurations. In case when such is detected it will raise WARNING.
+
+If configuration cache file is not provided, it defaults to:
+ C</var/cache/msg/config-cache/config.db>.
+Configuration table defaults to:
+ C<config_incoming>.
+
+It fully relies on GridMon::ConfigCache module for accessing configuration
+database.
+
+=head1 SEE ALSO
+
+GridMon::ConfigCache(3)
+
+=cut
+

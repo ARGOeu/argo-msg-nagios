@@ -1,0 +1,160 @@
+#!/usr/bin/perl
+# nagios: -epn
+
+=head1 NAME
+
+handle_service_check - Handle a Nagios service check and put it into a on-disk message cache
+
+=head1 SYNOPSIS
+
+B<handle_service_check> [--dir I<PATH>] [--role I<ROLE>] [--send-to-msg I<1|0>]  [--local-metric-store I<1|0>] [--v]
+
+=head1 DESCRIPTION
+
+B<handle_service_check> is called via a Nagios OCSP call. It creates a
+WLCG Monitoring WG compatible metricOutput message, stores it in a
+directory and then exits.
+
+Once the messages are prepared, they are stored it in a
+C<Messaging::Message::Queue> directory. If not provided, the directory
+defaults to C</var/spool/nagios-msg-bridge/outgoing-messages>.
+
+The role can be one of C<site>, C<roc>, C<project>, C<vo> and denotes
+if the Nagios is acting in a site, ROC, project or VO level monitoring
+role. It defaults to C<site>.
+
+A sample message could be :
+
+  org.nagios.SRM2-PortCheck OK 'TCP OK - 0.001 second response time on port 8443' \
+    egee.srce.hr globus-GRAM ce1-egee.srce.hr:2119 dteam
+
+If I<--send-to-msg> is set to 1, messages are inserted into the output directory.
+Default value is 1.
+
+If I<--local-metric-store> is set to 1, messages are also inserted
+into the local metric store directory queue C</var/spool/nagios2metricstore/data>.
+Default value is 0.
+
+=cut
+
+use strict;
+use warnings;
+use Getopt::Long;
+use GridMon::MetricOutput;
+use Messaging::Message::Queue;
+use Messaging::Message;
+
+use GridMon::Nagios qw(nagios_debug);
+use No::Worries::Syslog qw(syslog_open); 
+
+use No::Worries::Die qw(dief handler);
+use No::Worries::Warn qw(warnf handler);
+$SIG{__DIE__}  = \&No::Worries::Die::handler;
+$SIG{__WARN__} = \&No::Worries::Warn::handler;
+
+
+syslog_open(ident => "handle_service_check", facility => "user");
+nagios_debug("started");
+
+use Env qw(NAGIOS_HOSTNAME NAGIOS_SERVICEDESC NAGIOS_SERVICESTATE NAGIOS_SERVICESTATETYPE NAGIOS_SERVICEOUTPUT NAGIOS_SERVICENOTES NAGIOS_LONGSERVICEOUTPUT NAGIOS__SERVICESITE_NAME NAGIOS__SERVICEMETRIC_NAME NAGIOS__SERVICESERVICE_FLAVOUR NAGIOS__SERVICESERVICE_URI NAGIOS__SERVICEVO NAGIOS__SERVICEROC NAGIOS__SERVICEENCRYPTED NAGIOS__SERVICEVO_FQAN NAGIOS__SERVICESERVER);
+
+my $dir = "/var/spool/msg-nagios-bridge/outgoing-messages";
+my $role = 'site';
+my $localMetricStore = 0;
+my $sendToMsg = 1;
+my $verbose = 0;
+
+GetOptions(
+    'dir=s'                => \$dir,
+    'role=s'               => \$role,
+    'local-metric-store=i' => \$localMetricStore,
+    'send-to-msg=i'        => \$sendToMsg,
+    'v'                    => \$verbose,
+) or die("Usage: $0 [--dir PATH] [--role ROLE] [--local-metric-store 1|0] [--send-to-msg 1|0] [--v]\n");
+
+die("Expected to be run within Nagios - no Environment variables set\n")
+    unless defined($NAGIOS_SERVICEDESC);
+
+# exit if result shouldn't be sent to msg or local metric store
+exit if (!$sendToMsg && !$localMetricStore);
+
+# exist if this is soft state
+exit if $NAGIOS_SERVICESTATETYPE eq "SOFT";
+
+# now fill in the variables
+my $details = '';
+my $check = $NAGIOS_SERVICEDESC;
+my $metricName = $check;
+my $host_name = $NAGIOS_HOSTNAME;
+my ($site, $service_flavour, $service_type, $service_uri, @vo);
+my $vo = '';
+my $vo_fqan = '';
+my $roc = 'UNDEFINED';
+my $nagios_host = $NAGIOS__SERVICESERVER;
+if (defined $NAGIOS__SERVICESITE_NAME and
+    defined $NAGIOS__SERVICEMETRIC_NAME and
+    defined $NAGIOS__SERVICESERVICE_FLAVOUR and
+    defined $NAGIOS__SERVICESERVICE_URI) {
+    $site = $NAGIOS__SERVICESITE_NAME;
+    $metricName = $NAGIOS__SERVICEMETRIC_NAME;
+    $service_flavour = $NAGIOS__SERVICESERVICE_FLAVOUR;
+    $service_type = $NAGIOS__SERVICESERVICE_FLAVOUR;
+    $service_uri = $NAGIOS__SERVICESERVICE_URI;
+    $vo = $NAGIOS__SERVICEVO if (defined $NAGIOS__SERVICEVO);
+    $vo_fqan = $NAGIOS__SERVICEVO_FQAN if (defined $NAGIOS__SERVICEVO_FQAN);
+    $roc = $NAGIOS__SERVICEROC if (defined $NAGIOS__SERVICEROC);
+} elsif (defined $NAGIOS_SERVICENOTES) {
+    ($site, $service_flavour, $service_uri, @vo) = split(' ', $NAGIOS_SERVICENOTES);
+    if (scalar(@vo) > 0) {
+        $vo=$vo[0];
+    }
+    if ($vo and $check =~ /^(.*?)\-$vo$/) {
+        $metricName = $1;
+    }
+} else {
+    die("Either notes or custom vars (_site_name, _metric_name, _service_uri, _service_flavour) must be set\n");
+}
+
+$details = $NAGIOS_LONGSERVICEOUTPUT if defined $NAGIOS_LONGSERVICEOUTPUT;
+
+my $cache;
+my $message = GridMon::MetricOutput->new({
+    metric          => $metricName,
+    status          => $NAGIOS_SERVICESTATE,
+    summary         => $NAGIOS_SERVICEOUTPUT,
+    site            => $site,
+    service_flavour => $service_flavour,
+    service_type    => $service_type,
+    host_name       => $host_name,
+    service_uri     => $service_uri,
+    details         => $details,
+    vo              => $vo,
+    vo_fqan         => $vo_fqan,
+    nagios_name     => $check,
+    role            => $role,
+    encrypted       => $NAGIOS__SERVICEENCRYPTED,
+});
+my $metadata = {
+    sitename    => $site,
+    role        => $role,
+    ROC         => $roc,
+    nagios_host => $nagios_host,
+};
+
+# logic taken from send_to_msg
+$site =~ s/\./_/g;
+$metadata->{destination} = "/topic/grid.probe.metricOutput.EGEE.$role.$site";
+
+if ($sendToMsg) {   
+    $cache = Messaging::Message::Queue->new(type => 'DQS', path => $dir);
+    nagios_debug("posting to $metadata->{destination}");
+    print $message->wlcg_format() if $verbose;
+    $cache->add_message(Messaging::Message->new(body => $message->wlcg_format(), header => $metadata));
+}
+
+if ($localMetricStore) {
+    $dir = "/var/spool/nagios2metricstore/data";
+    nagios_debug("storing into $dir");
+    $cache = Messaging::Message::Queue->new(type => 'DQS', path => $dir);
+    $cache->add_message(Messaging::Message->new(body => $message->wlcg_format(), header => $metadata));
+}

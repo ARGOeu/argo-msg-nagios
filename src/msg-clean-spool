@@ -1,0 +1,28 @@
+#!/bin/sh
+#
+# clean the spool directories used by msg-nagios-bridge
+#
+
+# setup
+dir=/var/spool/msg-nagios-bridge
+cd $dir 2>/dev/null
+if [ $? != 0 ]; then
+  echo "$0: cannot cd $dir -- aborting"
+  exit 1
+fi
+echo "$0: cleaning under $dir"
+
+# phase 1: remove unused IPC::DirQueue intermediate directories
+for name in *; do
+  for dir in active data queue tmp; do
+    [ -d $name/$dir ] && find $name/$dir -depth -mindepth 1 -type d -empty -exec rmdir -v \{\} \;
+  done
+done
+
+# we currently stop at phase 1!
+exit 0
+
+# phase 2: remove unused IPC::DirQueue directories
+for name in error-messages outgoing outgoing_alarms; do
+  [ -d $name ] && find $name -depth -type d -empty -exec rmdir -v \{\} \;
+done

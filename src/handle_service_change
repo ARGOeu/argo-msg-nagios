@@ -1,0 +1,192 @@
+#!/usr/bin/perl
+# nagios: -epn
+
+=head1 NAME
+
+handle_service_change - Handle a Nagios notification and put it into a on-disk message cache
+
+=head1 SYNOPSIS
+
+B<handle_service_change> [--dir I<PATH>] [--role I<ROLE>] [--send-to-dashboard] [--v]
+
+=head1 DESCRIPTION
+
+B<handle_service_change> is called via a Nagios notification handler dealing with
+service changes. As a result, depending on how the script is called, it can create
+two different kinds of message output:
+
+=over
+
+=item . DashboardOutput message using YAML to be sent to a unique topic
+
+=back
+
+Once the messages are prepared, they are stored it in a
+C<Messaging::Message::Queue> directory. If not provided, the directory
+defaults to C</var/spool/nagios-msg-bridge/outgoing-messages>.
+
+The role can be one of C<site>, C<roc>, C<project>, C<vo> and denotes
+if the Nagios is acting in a site, ROC, project or VO level monitoring
+role. It defaults to C<site>.
+
+For the Dashboard, resulting message is expected to be sent to the
+"grid.probe.notification" topic.
+
+Example of valid call, from within Nagios' commands.cfg:
+
+  # handle_service_change --send-to-dashboard --ggus-server=iwrgustrain.fzk.de --role=site 
+
+A sample Dashboard resulting message could be :
+
+  Content-Type: text/x-yaml
+  ---
+  executionTime: 2009-06-24T14:30:45+0200
+  nodeName: myhost.mysite.edu
+  notificationTime: 2009-06-24T14:30:54+0200
+  notificationType: PROBLEM
+  siteName: My-Site
+  testName: hr.srce.SRM-Transfer
+  testStatus: CRITICAL
+  timestamp: 2009-06-24T14:30:54Z
+  urlToHelp: http://wiki.cro-ngi.hr/index.php/hr.srce.SRM-Transfer
+  urlToHistory: https://nagios.mysite.edu/nagios/cgi-bin/history.cgi?host=myhost.mysite.edu&service=hr.srce.SRM-Transfer
+  EOT
+
+=head1 CONTACT
+
+Romain Wartel
+Emir Imamagic
+
+=cut
+
+use strict;
+use warnings;
+use Digest::SHA1 qw(sha1_hex);
+use Getopt::Long;
+use GridMon::DashboardOutput;
+use Messaging::Message::Queue;
+use Messaging::Message;
+
+use No::Worries::Date qw(date_string); 
+use GridMon::Nagios qw(nagios_debug nagios_cmd);
+use No::Worries::Syslog qw(syslog_open);
+
+use No::Worries::Die qw(dief handler); 
+use No::Worries::Warn qw(warnf handler);
+
+$SIG{__DIE__}  = \&No::Worries::Die::handler;
+$SIG{__WARN__} = \&No::Worries::Warn::handler; 
+
+syslog_open(ident => "handle_service_change", facility => "user");
+nagios_debug("started");
+
+my $dir = "/var/spool/msg-nagios-bridge/outgoing-messages";
+my $role = 'site';
+my $ggus_server = '';
+my $ggus_ticket = '';
+my $send_to_dashboard = ''; 
+my $verbose = 0;
+my $details = '';
+my $author = "Nagios to Dashboard" ; # Author field on the Nagios Web interface
+
+use Env qw(NAGIOS__SERVICESERVER NAGIOS_SERVICEDESC NAGIOS_SERVICESTATE NAGIOS_HOSTNAME NAGIOS__SERVICESERVICE_URI NAGIOS__SERVICEVO NAGIOS_SERVICENOTES NAGIOS_SERVICENOTESURL NAGIOS_LASTSERVICECHECK NAGIOS_SITENAME NAGIOS_TIMET NAGIOS_NOTIFICATIONTYPE NAGIOS_LONGSERVICEOUTPUT NAGIOS__SERVICESITE_NAME NAGIOS_CONTACTNAME NAGIOS_CONTACTEMAIL NAGIOS_NOTIFICATIONTYPE NAGIOS_NOTIFICATIONCOMMENT NAGIOS__SERVICEGGUS NAGIOS__SERVICEROC NAGIOS_SERVICEPROBLEMID NAGIOS_LASTSERVICEPROBLEMID NAGIOS__SERVICESERVICE_FLAVOUR NAGIOS__SERVICEVO);
+
+GetOptions(
+    'dir=s'             => \$dir,
+    'role=s'            => \$role,
+    'ggus-server=s'     => \$ggus_server,
+    'send-to-dashboard' => \$send_to_dashboard,
+    'v'                 => \$verbose,
+) or die("Usage: $0 [--dir PATH] [--role ROLE] [--ggus-server GGUS_SERVER_FQDN] [--send-to-dashboard] [--v]\n");
+
+die("No directory specified, use --dir\n")
+    unless $dir;
+die("No destination specified, use either or both these arguments: [--ggus-server GGUS_SERVER_FQDN] [--send-to-dashboard]\n")
+    unless $send_to_dashboard or $ggus_server;
+die("Check your configuration file, _GGUS variable not instanciated (in services.cfg?)\n")
+    if $ggus_server and not defined($NAGIOS__SERVICEGGUS);
+die("Expected to be run within Nagios - no Environment variables set\n")
+    unless defined($NAGIOS_SERVICEDESC);
+
+# now fill in the variables
+
+my $test_name         = $NAGIOS_SERVICEDESC;
+my $node_name         = $NAGIOS_HOSTNAME;
+my $execution_time    = date_string($NAGIOS_LASTSERVICECHECK);
+my $notification_time = date_string($NAGIOS_TIMET);
+my $notification_type = $NAGIOS_NOTIFICATIONTYPE;
+my $problem_id        = $NAGIOS_SERVICEPROBLEMID;
+
+# In case the service recovers, the problem ID becomes 0, but we send out the problem ID that has been solved
+$problem_id = $NAGIOS_LASTSERVICEPROBLEMID if $problem_id == 0;
+
+my $roc = $NAGIOS__SERVICEROC || "Unspecified"; 
+my $service_flavour = $NAGIOS__SERVICESERVICE_FLAVOUR || "None";
+my $url_help = $NAGIOS_SERVICENOTESURL || "";
+
+my($site, $service_type, $url_history, $vo);
+if (defined $NAGIOS__SERVICESITE_NAME and defined $NAGIOS__SERVICESERVICE_URI) {
+    $site = $NAGIOS__SERVICESITE_NAME;
+    $url_history = $NAGIOS__SERVICESERVICE_URI;
+    $vo = $NAGIOS__SERVICEVO if (defined $NAGIOS__SERVICEVO);
+} elsif (defined $NAGIOS_SERVICENOTES) {
+    ($site, $service_type, $url_history, $vo) = split(' ', $NAGIOS_SERVICENOTES);
+} else {
+    die("Either notes or custom vars (_site_name, _service_uri) must be set\n");
+}
+$service_type = "" unless defined($service_type);
+$vo = "" unless defined($vo);
+$site = "ERROR: could not get 'site' from NAGIOS__SERVICESITE_NAME" unless defined($site);
+
+$url_history= "https://".$NAGIOS__SERVICESERVER."/nagios/cgi-bin/status.cgi?host=".$NAGIOS_HOSTNAME; 
+
+$details = $NAGIOS_LONGSERVICEOUTPUT if defined($NAGIOS_LONGSERVICEOUTPUT);
+
+$ggus_ticket = $NAGIOS__SERVICEGGUS if $NAGIOS__SERVICEGGUS and $NAGIOS__SERVICEGGUS =~ /^https:\/\/\S+$/;
+
+# Preparing messages
+
+my($cache, $metadata, $message, $nagios_hash);
+
+$cache = Messaging::Message::Queue->new(type => 'DQS', path => $dir);
+$nagios_hash = sha1_hex($NAGIOS__SERVICESERVER);
+
+if ($send_to_dashboard) {
+    $metadata = {
+	'role'        => $role , 
+	'ROC'         => $roc, 
+	'nagios_host' => $NAGIOS__SERVICESERVER,
+	'reply-to'    => sprintf("/topic/grid.probe.notification.ack.%s", $nagios_hash),
+	'contentType' => "text/x-yaml", 
+	'destination' => "/topic/grid.probe.notification",
+    };
+    $message = GridMon::DashboardOutput->new({
+	site              => $site,
+	test_name         => $test_name,
+	node_name         => $node_name,
+	execution_time    => $execution_time,
+	service_flavour   => $service_flavour,
+	notification_time => $notification_time,
+	notification_type => $notification_type,
+	problem_id        => $problem_id,
+	status            => $NAGIOS_SERVICESTATE,
+	url_history       => $url_history,
+	url_help          => $url_help,
+	details           => $details,
+	vo                => $vo,
+    });
+    nagios_debug("[DASHBOARD] posting to $metadata->{destination}");
+    print $message->wlcg_format() if $verbose;
+    $cache->add_message(Messaging::Message->new(body => $message->wlcg_format(), header => $metadata));
+}
+
+# Adding comments Dashboard messages and updating environment variable
+if ($send_to_dashboard) {
+    nagios_debug("[DASHBOARD] updating comments for $node_name;$test_name: Notification sent\n");
+    my @list;
+    push(@list, "ADD_SVC_COMMENT;$node_name;$test_name;0;$author;Notification status: SENT");
+    push(@list, "CHANGE_CUSTOM_SVC_VAR;$node_name;$test_name;last_notification_type;$notification_type");
+    push(@list, "CHANGE_CUSTOM_SVC_VAR;$node_name;$test_name;dashboard_notification_status_last_update;".date_string());
+    push(@list, "CHANGE_CUSTOM_SVC_VAR;$node_name;$test_name;dashboard_notification_status;SENT");
+    nagios_cmd(@list);
+}
