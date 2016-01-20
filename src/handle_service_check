@@ -72,7 +72,7 @@ GetOptions(
 die("Expected to be run within Nagios - no Environment variables set\n")
     unless defined($NAGIOS_SERVICEDESC);
 
-die("Please provide a tenant name using the paramater --tenant \n")
+die("Please provide a tenant name with the --tenant parameter\n")
     unless ($tenant);
 
 # exit if result shouldn't be sent to msg or local metric store
