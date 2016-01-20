@@ -8,7 +8,6 @@ Source: %{name}-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-build
 BuildArch: noarch
 Requires: perl(GridMon) >= 1.0.70
-Requires: msg-utils
 Requires: perl(No::Worries)
 Obsoletes: msg-nagios-bridge
 
@@ -42,6 +41,7 @@ install --mode 644 ./msg-to-handler.sysconfig ${RPM_BUILD_ROOT}/etc/sysconfig/ms
 install --directory ${RPM_BUILD_ROOT}/etc/msg-to-handler.d
 install --mode 644 ./msg-to-handler.conf ${RPM_BUILD_ROOT}/etc
 install --directory ${RPM_BUILD_ROOT}/var/cache/msg/config-cache
+install --directory ${RPM_BUILD_ROOT}/var/cache/msg/broker-cache-file
 touch ${RPM_BUILD_ROOT}/var/cache/msg/config-cache/config.db
 install --directory ${RPM_BUILD_ROOT}/var/run/msg-to-handler
 install --directory ${RPM_BUILD_ROOT}/var/spool/%{name}/outgoing
@@ -72,6 +72,7 @@ rm -rf $RPM_BUILD_ROOT
 %config %attr(0644,root,root) /etc/msg-to-handler.conf
 %dir /etc/msg-to-handler.d
 %dir %attr(0770,nagios,nagios) /var/cache/msg/config-cache
+%dir %attr(0770,nagios,nagios) /var/cache/msg/broker-cache-file
 %dir %attr(0770,nagios,nagios) /var/run/msg-to-handler
 %dir %attr(0770,nagios,nagios) /var/spool/%{name}/outgoing
 %dir %attr(0770,nagios,nagios) /var/spool/%{name}/incoming
