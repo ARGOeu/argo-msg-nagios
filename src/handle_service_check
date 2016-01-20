@@ -7,7 +7,7 @@ handle_service_check - Handle a Nagios service check and put it into a on-disk m
 
 =head1 SYNOPSIS
 
-B<handle_service_check> [--dir I<PATH>] [--role I<ROLE>] [--send-to-msg I<1|0>]  [--local-metric-store I<1|0>] [--v]
+B<handle_service_check> [--dir I<PATH>] [--role I<ROLE>] [--send-to-msg I<1|0>] [--v]
 
 =head1 DESCRIPTION
 
@@ -30,10 +30,6 @@ A sample message could be :
 
 If I<--send-to-msg> is set to 1, messages are inserted into the output directory.
 Default value is 1.
-
-If I<--local-metric-store> is set to 1, messages are also inserted
-into the local metric store directory queue C</var/spool/nagios2metricstore/data>.
-Default value is 0.
 
 =cut
 
@@ -60,23 +56,21 @@ use Env qw(NAGIOS_HOSTNAME NAGIOS_SERVICEDESC NAGIOS_SERVICESTATE NAGIOS_SERVICE
 
 my $dir = "/var/spool/msg-nagios-bridge/outgoing-messages";
 my $role = 'site';
-my $localMetricStore = 0;
 my $sendToMsg = 1;
 my $verbose = 0;
 
 GetOptions(
     'dir=s'                => \$dir,
     'role=s'               => \$role,
-    'local-metric-store=i' => \$localMetricStore,
     'send-to-msg=i'        => \$sendToMsg,
     'v'                    => \$verbose,
-) or die("Usage: $0 [--dir PATH] [--role ROLE] [--local-metric-store 1|0] [--send-to-msg 1|0] [--v]\n");
+) or die("Usage: $0 [--dir PATH] [--role ROLE] [--send-to-msg 1|0] [--v]\n");
 
 die("Expected to be run within Nagios - no Environment variables set\n")
     unless defined($NAGIOS_SERVICEDESC);
 
 # exit if result shouldn't be sent to msg or local metric store
-exit if (!$sendToMsg && !$localMetricStore);
+exit if (!$sendToMsg);
 
 # exist if this is soft state
 exit if $NAGIOS_SERVICESTATETYPE eq "SOFT";
@@ -149,12 +143,5 @@ if ($sendToMsg) {
     $cache = Messaging::Message::Queue->new(type => 'DQS', path => $dir);
     nagios_debug("posting to $metadata->{destination}");
     print $message->wlcg_format() if $verbose;
-    $cache->add_message(Messaging::Message->new(body => $message->wlcg_format(), header => $metadata));
-}
-
-if ($localMetricStore) {
-    $dir = "/var/spool/nagios2metricstore/data";
-    nagios_debug("storing into $dir");
-    $cache = Messaging::Message::Queue->new(type => 'DQS', path => $dir);
     $cache->add_message(Messaging::Message->new(body => $message->wlcg_format(), header => $metadata));
 }
