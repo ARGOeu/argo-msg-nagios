@@ -24,14 +24,14 @@ generated Nagios configuration from SQLite based cache and publish it
 to the messaging system.
 
 If not provided, the directory defaults to
-C</var/spool/nagios-msg-bridge/outgoing/>.
+C</var/spool/argo-msg-nagios/outgoing/>.
 
 If configuration cache file is not provided, it defaults to:
 C</var/cache/msg/config-cache/config.db>. Configuration table
 defaults to: C<config_outgoing>.
 
 If not provided, the directory with alarms defaults to
-C</var/spool/nagios-msg-bridge/outgoing_alarms/>.
+C</var/spool/argo-msg-nagios/outgoing_alarms/>.
 
 In case it cannot send a message, a warning is issued and the message
 is moved to the "error queue", which can be controlled using
@@ -44,7 +44,8 @@ the I<msg-brokers> script. The broker on the command line takes
 precedence over those specified in the cache file.
 
 If not provided, the destination defaults to
-C</topic/grid.probe.metricOutput.EGEE>.  A destination is created by:
+C</topic/nagios.metricOutput>.  A destination is created by:
+  * append tenant's name
   * append the role (e.g. C<Site>, C<ROC>, C<Project>, C<VO>)
   * append C<.SITE_NAME> to the prefix.
 
@@ -100,15 +101,15 @@ use constant USAGE => "usage: $0 [ -v ] [ --dir I<qdirectory> ] [ --prefix I<des
   [ --config-cache I<file> ] [ --config-table I<table-name> ] [ --config-prefix I<destination prefix> ]
   [ --alarm-dir I<qdirectory> ] [ --alarm-prefix I<destination prefix> ] [--persistent]\n";
 use constant DEFAULT_BATCH_SIZE => 10000;
-use constant DEFAULT_DIR => '/var/spool/msg-nagios-bridge/outgoing';
-use constant DEFAULT_PREFIX => '/topic/grid.probe.metricOutput.EGEE';
-use constant DEFAULT_ALARM_DIR => '/var/spool/msg-nagios-bridge/outgoing_alarms';
-use constant DEFAULT_ALARM_PREFIX => '/topic/grid.probe.notification';
+use constant DEFAULT_DIR => '/var/spool/argo-msg-nagios/outgoing';
+use constant DEFAULT_PREFIX => '/topic/nagios.metricOutput';
+use constant DEFAULT_ALARM_DIR => '/var/spool/argo-msg-nagios/outgoing_alarms';
+use constant DEFAULT_ALARM_PREFIX => '/topic/nagios.probe.notification';
 use constant DEFAULT_CONFIG_CACHE => '/var/cache/msg/config-cache/config.db';
 use constant DEFAULT_CONFIG_TABLE => 'config_outgoing';
-use constant DEFAULT_CONFIG_PREFIX => '/topic/grid.config.metricOutput.EGEE';
-use constant DEFAULT_ERROR_DIR => '/var/spool/msg-nagios-bridge/undelivered-messages';
-use constant DEFAULT_OUTGOING_DIR => '/var/spool/msg-nagios-bridge/outgoing-messages';
+use constant DEFAULT_CONFIG_PREFIX => '/topic/nagios.config.metricOutput';
+use constant DEFAULT_ERROR_DIR => '/var/spool/argo-msg-nagios/undelivered-messages';
+use constant DEFAULT_OUTGOING_DIR => '/var/spool/argo-msg-nagios/outgoing-messages';
 use constant DEFAULT_BROKER_CACHE => '/var/cache/msg/broker-cache-file/broker-list';
 use constant TIMEOUT => 0.1;
 
@@ -220,7 +221,7 @@ sub file_message ($) {
     $object{message} = $msg->jsonify();
     $name = $Cache{errors}->add_message(Messaging::Message->new(
         header => {
-	    "destination" => "/queue/grid.error.messages",
+	    "destination" => "/queue/nagios.error.messages",
 	    "persistent"  => "true",
 	    "expires"     => 1000 * (time() + 604800), # 1 week
 	    "mig-type"    => "message-with-error",
