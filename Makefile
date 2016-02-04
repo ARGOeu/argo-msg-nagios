@@ -1,4 +1,4 @@
-PKGNAME=argo-msg-nagios
+PKGNAME=argo-msg-eudat-nagios
 SPECFILE=${PKGNAME}.spec
 FILES=Makefile ${SPECFILE} src/* config/*
 
