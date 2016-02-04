@@ -1,5 +1,5 @@
 Summary: Bridge from Nagios to the MSG Messaging system
-Name: argo-msg-nagios
+Name: argo-msg-eudat-nagios
 Version: 1.0.0
 Release: 1%{?dist}
 License: APL2
