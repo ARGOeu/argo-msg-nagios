@@ -1,6 +1,6 @@
 Summary: Bridge from Nagios to the MSG Messaging system
 Name: argo-msg-nagios
-Version: 1.0.1
+Version: 1.0.2
 Release: 1%{?dist}
 License: APL2
 Group: Network/Monitoring
@@ -8,7 +8,6 @@ Source: %{name}-%{version}.tar.gz
 BuildRoot: %{_tmppath}/%{name}-%{version}-build
 BuildArch: noarch
 Requires: perl(GridMon) >= 1.0.70
-Requires: msg-utils
 Requires: perl(No::Worries)
 Obsoletes: msg-nagios-bridge
 
@@ -105,6 +104,9 @@ fi
 :
 
 %changelog
+* Tue Mar 15 2016 Emir Imamagic <eimamagi@srce.hr> - 1.0.1-2%{?dist}
+- Removed msg-utils dependency
+- Modified default config
 * Mon Feb 15 2016 Emir Imamagic <eimamagi@srce.hr> - 1.0.1-1%{?dist}
 - Removed MRS related bits
 - Added tennant support
