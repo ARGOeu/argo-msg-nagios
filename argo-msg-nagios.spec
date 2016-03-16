@@ -1,6 +1,6 @@
 Summary: Bridge from Nagios to the MSG Messaging system
 Name: argo-msg-nagios
-Version: 1.0.2
+Version: 1.0.3
 Release: 1%{?dist}
 License: APL2
 Group: Network/Monitoring
@@ -104,6 +104,8 @@ fi
 :
 
 %changelog
+* Wed Mar 16 2016 Emir Imamagic <eimamagi@srce.hr> - 1.0.3-1%{?dist}
+- Cleaned default locations
 * Tue Mar 15 2016 Emir Imamagic <eimamagi@srce.hr> - 1.0.1-2%{?dist}
 - Removed msg-utils dependency
 - Modified default config

@@ -45,7 +45,7 @@ General Public Licence (see http://www.fsf.org/licensing/licenses/gpl.txt).
 Copyright (c) 2009 Emir Imamagic';
 use constant SHORTNAME => 'RecvFromQueue';
 use constant USAGE => "usage: $0 [ -v ] [ --dir I<qdirectory> ] [ --batch I<BATCH_SIZE> ]\n";
-use constant DEFAULT_QUEUE_DIR => '/var/spool/msg-nagios-bridge/incoming';
+use constant DEFAULT_QUEUE_DIR => '/var/spool/argo-msg-nagios/incoming';
 use constant DEFAULT_BATCH_SIZE => 1000;
 use constant TIMEOUT => 0.1;
 

@@ -80,7 +80,7 @@ $SIG{__WARN__} = \&No::Worries::Warn::handler;
 syslog_open(ident => "handle_service_change", facility => "user");
 nagios_debug("started");
 
-my $dir = "/var/spool/msg-nagios-bridge/outgoing-messages";
+my $dir = "/var/spool/argo-msg-nagios/outgoing-messages";
 my $role = 'site';
 my $ggus_server = '';
 my $ggus_ticket = '';
