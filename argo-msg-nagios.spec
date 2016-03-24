@@ -1,6 +1,6 @@
 Summary: Bridge from Nagios to the MSG Messaging system
 Name: argo-msg-nagios
-Version: 1.0.3
+Version: 1.0.4
 Release: 1%{?dist}
 License: APL2
 Group: Network/Monitoring
@@ -40,8 +40,8 @@ install --directory ${RPM_BUILD_ROOT}/etc/sysconfig
 install --mode 644 ./msg-to-handler.sysconfig ${RPM_BUILD_ROOT}/etc/sysconfig/msg-to-handler
 install --directory ${RPM_BUILD_ROOT}/etc/msg-to-handler.d
 install --mode 644 ./msg-to-handler.conf ${RPM_BUILD_ROOT}/etc
-install --directory ${RPM_BUILD_ROOT}/var/cache/msg/config-cache
-touch ${RPM_BUILD_ROOT}/var/cache/msg/config-cache/config.db
+install --directory ${RPM_BUILD_ROOT}/var/cache/%{name}
+touch ${RPM_BUILD_ROOT}/var/cache/%{name}/config.db
 install --directory ${RPM_BUILD_ROOT}/var/run/msg-to-handler
 install --directory ${RPM_BUILD_ROOT}/var/spool/%{name}/outgoing
 install --directory ${RPM_BUILD_ROOT}/var/spool/%{name}/incoming
@@ -67,10 +67,10 @@ rm -rf $RPM_BUILD_ROOT
 /etc/init.d/msg-to-handler
 /etc/cron.hourly/msg-to-handler.chk
 %config /etc/sysconfig/msg-to-handler
-%config %attr(0644,nagios,nagios) /var/cache/msg/config-cache/config.db
+%config %attr(0644,nagios,nagios) /var/cache/%{name}/config.db
 %config %attr(0644,root,root) /etc/msg-to-handler.conf
 %dir /etc/msg-to-handler.d
-%dir %attr(0770,nagios,nagios) /var/cache/msg/config-cache
+%dir %attr(0770,nagios,nagios) /var/cache/%{name}
 %dir %attr(0770,nagios,nagios) /var/run/msg-to-handler
 %dir %attr(0770,nagios,nagios) /var/spool/%{name}/outgoing
 %dir %attr(0770,nagios,nagios) /var/spool/%{name}/incoming
@@ -104,6 +104,8 @@ fi
 :
 
 %changelog
+* Thu Mar 24 2016 Emir Imamagic <eimamagi@srce.hr> - 1.0.4-1%{?dist}
+- Changed default cache location
 * Wed Mar 16 2016 Emir Imamagic <eimamagi@srce.hr> - 1.0.3-1%{?dist}
 - Cleaned default locations
 * Tue Mar 15 2016 Emir Imamagic <eimamagi@srce.hr> - 1.0.1-2%{?dist}

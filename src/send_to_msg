@@ -27,7 +27,7 @@ If not provided, the directory defaults to
 C</var/spool/argo-msg-nagios/outgoing/>.
 
 If configuration cache file is not provided, it defaults to:
-C</var/cache/msg/config-cache/config.db>. Configuration table
+C</var/cache/argo-msg-nagios/config.db>. Configuration table
 defaults to: C<config_outgoing>.
 
 If not provided, the directory with alarms defaults to
@@ -105,12 +105,12 @@ use constant DEFAULT_DIR => '/var/spool/argo-msg-nagios/outgoing';
 use constant DEFAULT_PREFIX => '/topic/nagios.metricOutput';
 use constant DEFAULT_ALARM_DIR => '/var/spool/argo-msg-nagios/outgoing_alarms';
 use constant DEFAULT_ALARM_PREFIX => '/topic/nagios.probe.notification';
-use constant DEFAULT_CONFIG_CACHE => '/var/cache/msg/config-cache/config.db';
+use constant DEFAULT_CONFIG_CACHE => '/var/cache/argo-msg-nagios/config.db';
 use constant DEFAULT_CONFIG_TABLE => 'config_outgoing';
 use constant DEFAULT_CONFIG_PREFIX => '/topic/nagios.config.metricOutput';
 use constant DEFAULT_ERROR_DIR => '/var/spool/argo-msg-nagios/undelivered-messages';
 use constant DEFAULT_OUTGOING_DIR => '/var/spool/argo-msg-nagios/outgoing-messages';
-use constant DEFAULT_BROKER_CACHE => '/var/cache/msg/broker-cache-file/broker-list';
+use constant DEFAULT_BROKER_CACHE => '/var/cache/argo-msg-cache/broker-list';
 use constant TIMEOUT => 0.1;
 
 use constant HEADER_FAILED_TIME  => "send2msg-last-failed-sent-time";
